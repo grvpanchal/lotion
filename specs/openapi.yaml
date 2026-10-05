@@ -1,0 +1,316 @@
+openapi: 3.1.0
+info:
+  title: MINERVA Chat & Retrieval API
+  version: 1.0.0
+  description: >
+    REST + Server-Sent Events contract for the MINERVA research-discovery chat.
+    All endpoints require a Cognito JWT (Authorization: Bearer) or an API key (X-Api-Key).
+servers:
+  - url: https://minerva.example.org/v1
+security:
+  - bearerAuth: []
+  - apiKey: []
+paths:
+  /chat/sessions:
+    post:
+      summary: Create a chat session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 200 }
+                filters: { $ref: '#/components/schemas/Filters' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+  /chat/sessions/{session_id}:
+    get:
+      summary: Get a session with messages
+      parameters: [ { $ref: '#/components/parameters/SessionId' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+  /chat/sessions/{session_id}/messages:
+    post:
+      summary: Send a message and stream the answer (SSE)
+      parameters: [ { $ref: '#/components/parameters/SessionId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, maxLength: 2000 }
+                filters: { $ref: '#/components/schemas/Filters' }
+                as_of: { type: string, format: date, description: Retrieve article versions current at this date }
+                include_graph: { type: boolean, default: false }
+      responses:
+        '200':
+          description: >
+            text/event-stream. Events in order: status*, papers, (delta | citation)*, usage, done.
+            An `error` event may replace any later event.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: status
+                  data: {"stage":"understand"}
+
+                  event: papers
+                  data: {"papers":[{"article_id":"art_01J9","version":3,"title":"...","year":2023,"score":0.81,"why_matched":["vector","entity:BRCA1<->PARP"]}]}
+
+                  event: delta
+                  data: {"text":"PARP inhibitor resistance in BRCA1-mutant tumors is linked to "}
+
+                  event: citation
+                  data: {"n":1,"chunk_id":"chk_...","article_id":"art_01J9","version":3,"start":120,"end":310}
+
+                  event: usage
+                  data: {"input_tokens":9120,"cache_read_input_tokens":7700,"output_tokens":640}
+
+                  event: done
+                  data: {"message_id":"01J9...","stop_reason":"end_turn","latency_ms":{"ttft":1150,"total":6900}}
+        '400': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /search/papers:
+    post:
+      summary: Retrieve papers for a query without generating an answer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, maxLength: 2000 }
+                filters: { $ref: '#/components/schemas/Filters' }
+                as_of: { type: string, format: date }
+                top_k: { type: integer, default: 20, maximum: 100 }
+                expand_graph: { type: boolean, default: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query_understanding: { $ref: '#/components/schemas/QueryUnderstanding' }
+                  papers:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaperHit' }
+                  evidence_level: { type: string, enum: [strong, weak, none] }
+  /papers/{article_id}:
+    get:
+      summary: Paper metadata, versions and linked entities
+      parameters:
+        - { name: article_id, in: path, required: true, schema: { type: string } }
+        - { name: version, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Paper' }
+  /papers/{article_id}/graph:
+    get:
+      summary: Neighborhood for visualization
+      parameters:
+        - { name: article_id, in: path, required: true, schema: { type: string } }
+        - { name: hops, in: query, schema: { type: integer, minimum: 1, maximum: 2, default: 1 } }
+        - { name: min_confidence, in: query, schema: { type: number, default: 0.7 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Graph' }
+  /messages/{message_id}/feedback:
+    post:
+      summary: Submit feedback on an assistant message
+      parameters:
+        - { name: message_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: string, enum: [up, down] }
+                reason: { type: string, enum: [wrong_citation, irrelevant_papers, unsupported_claim, missing_paper, other] }
+                citation_n: { type: integer }
+                comment: { type: string, maxLength: 2000 }
+      responses:
+        '204': { description: Accepted }
+  /metrics/summary:
+    get:
+      summary: Dashboard metrics (curator/admin)
+      parameters:
+        - { name: window, in: query, schema: { type: string, enum: [24h, 7d, 30d], default: 7d } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    apiKey: { type: apiKey, in: header, name: X-Api-Key }
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code: { type: string }
+              message: { type: string }
+              retry_after_seconds: { type: integer }
+  schemas:
+    Filters:
+      type: object
+      properties:
+        year_from: { type: integer }
+        year_to: { type: integer }
+        sources: { type: array, items: { type: string, enum: [pubmed, pmc, arxiv, biorxiv, medrxiv, curated] } }
+        organism: { type: array, items: { type: string } }
+        study_type: { type: array, items: { type: string } }
+        open_access_only: { type: boolean, default: false }
+        include_retracted: { type: boolean, default: false }
+    QueryUnderstanding:
+      type: object
+      properties:
+        intent: { type: string, enum: [lookup, synthesis, relationship, comparison, clarification, out_of_scope] }
+        standalone_query: { type: string }
+        search_queries: { type: array, items: { type: string } }
+        entities:
+          type: array
+          items:
+            type: object
+            properties:
+              text: { type: string }
+              type: { type: string }
+              ontology_id: { type: [string, 'null'] }
+              confidence: { type: number }
+        filters: { $ref: '#/components/schemas/Filters' }
+    PaperHit:
+      type: object
+      properties:
+        article_id: { type: string }
+        version: { type: integer }
+        title: { type: string }
+        authors: { type: array, items: { type: string } }
+        venue: { type: string }
+        year: { type: integer }
+        doi: { type: string }
+        pmid: { type: string }
+        score: { type: number, description: Rerank relevance score 0-1 }
+        why_matched: { type: array, items: { type: string } }
+        best_chunk:
+          type: object
+          properties:
+            chunk_id: { type: string }
+            section: { type: string }
+            text: { type: string }
+        retracted: { type: boolean }
+    Paper:
+      allOf:
+        - $ref: '#/components/schemas/PaperHit'
+        - type: object
+          properties:
+            abstract: { type: string }
+            versions:
+              type: array
+              items:
+                type: object
+                properties:
+                  version: { type: integer }
+                  status: { type: string }
+                  valid_from: { type: string, format: date-time }
+                  valid_to: { type: [string, 'null'], format: date-time }
+            entities:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  type: { type: string }
+                  mentions: { type: integer }
+    Graph:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              label: { type: string, enum: [Paper, Entity, Dataset, Method, Cohort] }
+              name: { type: string }
+              props: { type: object, additionalProperties: true }
+        edges:
+          type: array
+          items:
+            type: object
+            properties:
+              source: { type: string }
+              target: { type: string }
+              type: { type: string }
+              confidence: { type: number }
+              evidence_chunk_ids: { type: array, items: { type: string } }
+    Session:
+      type: object
+      properties:
+        session_id: { type: string }
+        title: { type: string }
+        created_at: { type: string, format: date-time }
+        filters: { $ref: '#/components/schemas/Filters' }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+    Message:
+      type: object
+      properties:
+        message_id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        text: { type: string }
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              n: { type: integer }
+              chunk_id: { type: string }
+              article_id: { type: string }
+              version: { type: integer }
+              start: { type: integer }
+              end: { type: integer }
+        papers: { type: array, items: { $ref: '#/components/schemas/PaperHit' } }
+        model: { type: string }
+        prompt_version: { type: string }
+        created_at: { type: string, format: date-time }

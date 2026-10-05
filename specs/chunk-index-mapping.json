@@ -1,0 +1,66 @@
+{
+  "_comment": "Amazon OpenSearch mapping for the phase-3 scale-out path. Hybrid search uses a search pipeline with normalization-processor (min_max) and combination (arithmetic_mean, weights [0.4 bm25, 0.6 knn]) or client-side RRF identical to the Neo4j path.",
+  "settings": {
+    "index": {
+      "knn": true,
+      "knn.algo_param.ef_search": 256,
+      "number_of_shards": 6,
+      "number_of_replicas": 1,
+      "refresh_interval": "30s"
+    },
+    "analysis": {
+      "analyzer": {
+        "sci_english": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": ["lowercase", "english_possessive_stemmer", "english_stop", "english_stemmer"]
+        },
+        "exact_id": {
+          "type": "custom",
+          "tokenizer": "whitespace",
+          "filter": ["lowercase"]
+        }
+      },
+      "filter": {
+        "english_stop": { "type": "stop", "stopwords": "_english_" },
+        "english_stemmer": { "type": "stemmer", "language": "english" },
+        "english_possessive_stemmer": { "type": "stemmer", "language": "possessive_english" }
+      }
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "chunk_id": { "type": "keyword" },
+      "chunk_hash": { "type": "keyword" },
+      "article_id": { "type": "keyword" },
+      "version": { "type": "integer" },
+      "is_current": { "type": "boolean" },
+      "valid_from": { "type": "date" },
+      "valid_to": { "type": "date", "null_value": "9999-12-31" },
+      "retracted": { "type": "boolean" },
+      "suspicious": { "type": "boolean" },
+      "section": { "type": "keyword" },
+      "position": { "type": "integer" },
+      "title": { "type": "text", "analyzer": "sci_english", "fields": { "exact": { "type": "text", "analyzer": "exact_id" } } },
+      "text": { "type": "text", "analyzer": "sci_english", "fields": { "exact": { "type": "text", "analyzer": "exact_id" } } },
+      "year": { "type": "integer" },
+      "source": { "type": "keyword" },
+      "open_access": { "type": "boolean" },
+      "organism": { "type": "keyword" },
+      "study_type": { "type": "keyword" },
+      "entity_ids": { "type": "keyword" },
+      "embedding_model": { "type": "keyword" },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1024,
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "faiss",
+          "parameters": { "ef_construction": 256, "m": 32 }
+        }
+      }
+    }
+  }
+}

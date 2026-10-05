@@ -1,0 +1,120 @@
+{
+  "$comment": "JSON Schemas enforced via Claude structured outputs (output_config.format) at ingestion and in query understanding. All objects set additionalProperties=false and list every property in required, as strict mode demands.",
+  "query_understanding_v3": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["intent", "standalone_query", "search_queries", "entities", "filters", "needs_clarification", "clarifying_question", "reuse_previous_context"],
+    "properties": {
+      "intent": { "type": "string", "enum": ["lookup", "synthesis", "relationship", "comparison", "clarification", "out_of_scope"] },
+      "standalone_query": { "type": "string" },
+      "search_queries": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "type": "string" } },
+      "entities": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text", "type", "ontology_id", "confidence"],
+          "properties": {
+            "text": { "type": "string" },
+            "type": { "type": "string", "enum": ["Gene", "Protein", "Disease", "Chemical", "Organism", "Method", "Dataset", "Cohort", "Phenotype", "Anatomy", "Other"] },
+            "ontology_id": { "type": ["string", "null"] },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      },
+      "filters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["year_from", "year_to", "organism", "study_type", "open_access_only"],
+        "properties": {
+          "year_from": { "type": ["integer", "null"] },
+          "year_to": { "type": ["integer", "null"] },
+          "organism": { "type": "array", "items": { "type": "string" } },
+          "study_type": { "type": "array", "items": { "type": "string" } },
+          "open_access_only": { "type": "boolean" }
+        }
+      },
+      "needs_clarification": { "type": "boolean" },
+      "clarifying_question": { "type": ["string", "null"] },
+      "reuse_previous_context": { "type": "boolean" }
+    }
+  },
+  "extraction_v2": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["entities", "relations", "datasets", "methods", "cohorts"],
+    "properties": {
+      "entities": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mention", "canonical_name", "type", "ontology_hint", "chunk_id", "confidence"],
+          "properties": {
+            "mention": { "type": "string" },
+            "canonical_name": { "type": "string" },
+            "type": { "type": "string", "enum": ["Gene", "Protein", "Disease", "Chemical", "Organism", "Phenotype", "Anatomy"] },
+            "ontology_hint": { "type": ["string", "null"], "description": "e.g. HGNC symbol, MeSH heading, ChEBI name; never invent an identifier number" },
+            "chunk_id": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      },
+      "relations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subject", "predicate", "object", "evidence", "chunk_id", "confidence", "negated", "hedged"],
+          "properties": {
+            "subject": { "type": "string", "description": "canonical_name of an entity in this output" },
+            "predicate": { "type": "string", "enum": ["ASSOCIATED_WITH", "TREATS", "INHIBITS", "ACTIVATES", "CAUSES", "BIOMARKER_FOR", "INTERACTS_WITH", "PART_OF", "EVALUATED_ON", "COMPARED_WITH", "CONTRADICTS", "SUPPORTS"] },
+            "object": { "type": "string" },
+            "evidence": { "type": "string", "description": "verbatim span from the chunk, <= 300 chars" },
+            "chunk_id": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "negated": { "type": "boolean" },
+            "hedged": { "type": "boolean" }
+          }
+        }
+      },
+      "datasets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "accession", "chunk_id"],
+          "properties": {
+            "name": { "type": "string" },
+            "accession": { "type": ["string", "null"] },
+            "chunk_id": { "type": "string" }
+          }
+        }
+      },
+      "methods": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "chunk_id"],
+          "properties": { "name": { "type": "string" }, "chunk_id": { "type": "string" } }
+        }
+      },
+      "cohorts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "size", "description", "chunk_id"],
+          "properties": {
+            "name": { "type": "string" },
+            "size": { "type": ["integer", "null"] },
+            "description": { "type": "string" },
+            "chunk_id": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
